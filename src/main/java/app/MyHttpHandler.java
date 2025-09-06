@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -28,7 +29,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     private String whuUrl="https://gym.whu.edu.cn/api/GSOrder/Create";
 
-    private int timedelay = 0;       // 默认是18:00就放行
+    private String passtime = "18:00:00";
 
     private List<OrderInfo> orderInfos;  // 用 List 存储 Order 对象
     private final AtomicInteger index = new AtomicInteger(-1); //下标
@@ -38,14 +39,14 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     public MyHttpHandler(MontoyaApi api) {
         this.logging = api.logging();
-        logging.logToOutput("插件注册成功 👌");
+        logging.logToOutput("Plugin register successs 👌");
 
         // 获取用户目录
         String userHome = System.getProperty("user.home");
         File configFile = new File(userHome, "BadmintonConfig.json");
 
         if (!configFile.exists()) {
-            logging.logToError("配置文件不存在: " + configFile.getAbsolutePath());
+            logging.logToError("File not found: " + configFile.getAbsolutePath());
             return;
         }
 
@@ -53,9 +54,9 @@ public class MyHttpHandler implements ProxyRequestHandler {
             // 先读成树形结构
             JsonNode root = objectMapper.readTree(configFile);
 
-            // 取 timedelay
-            if (root.has("timedelay")) {
-                this.timedelay = root.get("timedelay").asInt();
+            // 取 passtime 字段
+            if (root.has("passtime")) {
+                this.passtime = root.get("passtime").asText();
             }
 
             // 取 orderinfos 并映射成 List<OrderInfo>
@@ -66,12 +67,12 @@ public class MyHttpHandler implements ProxyRequestHandler {
                 );
             }
 
-            logging.logToOutput("配置加载成功 ✅");
-            logging.logToOutput("timedelay = " + timedelay);
+            logging.logToOutput("config load success ✅");
+            logging.logToOutput("passtime = " + passtime);
             logging.logToOutput("orders = " + orderInfos);
 
         } catch (IOException e) {
-            logging.logToError("加载配置失败: " + e.getMessage());
+            logging.logToError("config load failure: " + e.getMessage());
         }
     }
     @Override
@@ -104,7 +105,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
             // 输出当前时间
             logging.logToOutput("Current time: " + java.time.LocalDateTime.now());
             // 输出请求体
-            logging.logToOutput("Request body: " + interceptedRequest.bodyToString()+"\n\n");
+            logging.logToOutput("Request body Modified: " + interceptedRequest.bodyToString()+"\n\n");
 
         }
         return ProxyRequestToBeSentAction.continueWith(interceptedRequest);
@@ -112,16 +113,23 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     public void sleepUntilRelease() {
         LocalDateTime now = LocalDateTime.now();
-        // 基础放行时间：今天 18:00:00
-        LocalDateTime targetTime = now.with(LocalTime.of(18, 0, 0));
 
-        // 如果已经过了18:00，目标时间就设置为明天的18:00
-        if (now.isAfter(targetTime)) {
-            targetTime = targetTime.plusDays(1);
+        // 解析 passtime 字符串为 LocalTime
+        LocalTime passLocalTime;
+        try {
+            passLocalTime = LocalTime.parse(passtime); // passtime 格式必须是 "HH:mm:ss"
+        } catch (DateTimeParseException e) {
+            logging.logToError("Invalid passtime format: " + passtime);
+            return;
         }
 
-        // 加上 timedelay（单位：秒）
-        targetTime = targetTime.plusSeconds(timedelay);
+        LocalDateTime targetTime = now.with(passLocalTime);
+
+        // 如果已经过了 passtime
+        if (now.isAfter(targetTime)) {
+            logging.logToError("Current time is already past passtime: " + passtime);
+            return;
+        }
 
         Duration duration = Duration.between(now, targetTime);
         long millisToSleep = duration.toMillis();
@@ -136,6 +144,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
             Thread.currentThread().interrupt(); // 重新设置中断状态
         }
     }
+
 
     private String modifyJsonFields(String jsonInput, OrderInfo orderInfo) {
         try {
