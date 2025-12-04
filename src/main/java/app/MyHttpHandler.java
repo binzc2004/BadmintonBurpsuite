@@ -14,14 +14,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class MyHttpHandler implements ProxyRequestHandler {
 
@@ -31,8 +36,8 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     private String passtime = "18:00:00";
 
-    private List<OrderInfo> orderInfos;  // 用 List 存储 Order 对象
-    private final AtomicInteger index = new AtomicInteger(-1); //下标
+    private OrderInfo aOrderInfo;  //  存储 Order 对象
+
 
     private final ObjectMapper objectMapper = new ObjectMapper();    //包装器
 
@@ -60,16 +65,16 @@ public class MyHttpHandler implements ProxyRequestHandler {
             }
 
             // 取 orderinfos 并映射成 List<OrderInfo>
-            if (root.has("orderinfos")) {
-                this.orderInfos = objectMapper.readValue(
-                        root.get("orderinfos").toString(),
-                        new TypeReference<List<OrderInfo>>() {}
+            if (root.has("orderinfo")) {
+                this.aOrderInfo = objectMapper.readValue(
+                        root.get("orderinfo").toString(),
+                        new TypeReference<OrderInfo>() {}
                 );
             }
 
             logging.logToOutput("config load success ✅");
             logging.logToOutput("passtime = " + passtime);
-            logging.logToOutput("orders = " + orderInfos);
+            logging.logToOutput("order = " + aOrderInfo);
 
         } catch (IOException e) {
             logging.logToError("config load failure: " + e.getMessage());
@@ -80,14 +85,11 @@ public class MyHttpHandler implements ProxyRequestHandler {
         String requestUrl = interceptedRequest.url();
 
         if (whuUrl.equals(requestUrl)) {
-            int iindex = this.index.incrementAndGet();
-            logging.logToOutput("Times " + iindex + " Received request: " + interceptedRequest.url());
 
             String jsonInput = interceptedRequest.bodyToString();
-            OrderInfo torder = this.orderInfos.get(iindex);
-
+            String WDVerifyToken = getWDVerifyToken(interceptedRequest);
             // 修改请求体 JSON
-            String bodyModified = modifyJsonFields(jsonInput, torder);
+            String bodyModified = modifyJsonFields(jsonInput, aOrderInfo,WDVerifyToken);
 
             HttpRequest modifiedRequest = interceptedRequest.withBody(bodyModified);
             return ProxyRequestReceivedAction.continueWith(modifiedRequest);
@@ -146,7 +148,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
     }
 
 
-    private String modifyJsonFields(String jsonInput, OrderInfo orderInfo) {
+    private String modifyJsonFields(String jsonInput, OrderInfo orderInfo , String WDVerifyToken) {
         try {
             // 解析成树
             JsonNode root = objectMapper.readTree(jsonInput);
@@ -159,6 +161,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
                 obj.put("appointmentEndDate", orderInfo.getAppointmentEndDate());
                 obj.put("stadiumsAreaId", orderInfo.getStadiumsAreaId());
                 obj.put("stadiumsAreaNo", orderInfo.getStadiumsAreaNo());
+                obj.put("WDVerifyToken", WDVerifyToken);
 
                 return objectMapper.writeValueAsString(obj);
             }
@@ -168,6 +171,85 @@ public class MyHttpHandler implements ProxyRequestHandler {
         // 出错就返回原始
         return jsonInput;
     }
+
+    private String getWDVerifyToken(InterceptedRequest interceptedRequest)  {
+        // 目标时间：今天的 18:00:01
+        LocalDateTime target = LocalDateTime.now()
+                .withHour(18)
+                .withMinute(0)
+                .withSecond(0)
+                .withNano(0);
+
+        // 当前时间
+        LocalDateTime now = LocalDateTime.now();
+
+        // 如果当前时间还没到 18:00:01，则等待
+        if (now.isBefore(target)) {
+            long millisToWait = Duration.between(now, target).toMillis();
+            try {
+                Thread.sleep(millisToWait);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        String WDVerifyToken = null;
+        try{
+            // 获取 WDVerifyToken
+            String urlString = String.format(
+                    "https://gym.whu.edu.cn/api/GSStadiums/GetAppointmentDetail?Version=%s&StadiumsAreaId=%s&StadiumsAreaNo=%s&AppointmentDate=%s",
+                    3, this.aOrderInfo.getStadiumsAreaId(), this.aOrderInfo.getStadiumsAreaNo(), this.aOrderInfo.getAppointmentStartDate().split(" ")[0]
+            );
+            logging.logToOutput("\n URL :" + urlString);
+            URL url = new URL(urlString);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            // 设置请求方法
+            conn.setRequestMethod("GET");
+
+            // 设置请求头
+            conn.setRequestProperty("accept", "*/*");
+            conn.setRequestProperty("accept-language", "zh-CN,zh;q=0.9");
+            conn.setRequestProperty("Authorization",interceptedRequest.headerValue("Authorization") );
+            conn.setRequestProperty("content-type", "application/json");
+            conn.setRequestProperty("priority", "u=1, i");
+            conn.setRequestProperty("referer", "https://gym.whu.edu.cn/hsdsqhafive/pages/index/detail?areaId=11&areaNo=8&date=2025-10-29");
+            conn.setRequestProperty("sec-ch-ua", "\"Google Chrome\";v=\"141\", \"Not?A_Brand\";v=\"8\", \"Chromium\";v=\"141\"");
+            conn.setRequestProperty("sec-ch-ua-mobile", "?0");
+            conn.setRequestProperty("sec-ch-ua-platform", "\"Windows\"");
+            conn.setRequestProperty("sec-fetch-dest", "empty");
+            conn.setRequestProperty("sec-fetch-mode", "cors");
+            conn.setRequestProperty("sec-fetch-site", "same-origin");
+            conn.setRequestProperty("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36");
+            conn.setRequestProperty("Cookie",interceptedRequest.headerValue("Cookie"));
+            // 发请求
+            int responseCode = conn.getResponseCode();
+            logging.logToOutput("Response Code: " + responseCode);
+
+            // 读取响应
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream(), "UTF-8")
+            );
+
+            StringBuilder response = new StringBuilder();
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                response.append(line);
+            }
+
+            reader.close();
+            String json = response.toString();
+            logging.logToError("\n"+json+"\n");
+            JsonNode root = new ObjectMapper().readTree(json);
+            WDVerifyToken = root.get("WDToken").asText();
+            logging.logToOutput("Success get detail, include token "+WDVerifyToken+"\n");
+//            Thread.sleep(100);     //傻逼学校，wdtoken和create请求必须间隔2s以上
+        }catch (Exception e){
+            logging.logToOutput("Try to get wdtoken failed!!!!!!!!!!!!!!!!!!!!!!!\n");
+        }
+        return WDVerifyToken;
+    }
+
 
 
 }
