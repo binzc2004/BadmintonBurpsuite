@@ -45,6 +45,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
     public MyHttpHandler(MontoyaApi api) {
         this.logging = api.logging();
         logging.logToOutput("Plugin register successs 👌");
+        logging.logToOutput("Plugin version: 1.0.1");
 
         // 获取用户目录
         String userHome = System.getProperty("user.home");
@@ -85,13 +86,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
         String requestUrl = interceptedRequest.url();
 
         if (whuUrl.equals(requestUrl)) {
-
-            String jsonInput = interceptedRequest.bodyToString();
-            String WDVerifyToken = getWDVerifyToken(interceptedRequest);
-            // 修改请求体 JSON
-            String bodyModified = modifyJsonFields(jsonInput, aOrderInfo,WDVerifyToken);
-
-            HttpRequest modifiedRequest = interceptedRequest.withBody(bodyModified);
+            HttpRequest modifiedRequest = modifyRequest(interceptedRequest,aOrderInfo);
             return ProxyRequestReceivedAction.continueWith(modifiedRequest);
         } else {
             return ProxyRequestReceivedAction.continueWith(interceptedRequest);
@@ -148,36 +143,16 @@ public class MyHttpHandler implements ProxyRequestHandler {
     }
 
 
-    private String modifyJsonFields(String jsonInput, OrderInfo orderInfo , String WDVerifyToken) {
-        try {
-            // 解析成树
-            JsonNode root = objectMapper.readTree(jsonInput);
 
-            // 转成 ObjectNode 才能修改
-            if (root.isObject()) {
-                ObjectNode obj = (ObjectNode) root;
-
-                obj.put("appointmentStartDate", orderInfo.getAppointmentStartDate());
-                obj.put("appointmentEndDate", orderInfo.getAppointmentEndDate());
-                obj.put("stadiumsAreaId", orderInfo.getStadiumsAreaId());
-                obj.put("stadiumsAreaNo", orderInfo.getStadiumsAreaNo());
-                obj.put("WDVerifyToken", WDVerifyToken);
-
-                return objectMapper.writeValueAsString(obj);
-            }
-        } catch (Exception e) {
-            logging.logToError("修改 JSON 出错: " + e.getMessage());
-        }
-        // 出错就返回原始
-        return jsonInput;
-    }
-
-    private String getWDVerifyToken(InterceptedRequest interceptedRequest)  {
+    //修改拦截请求体
+    private HttpRequest modifyRequest(InterceptedRequest interceptedRequest,OrderInfo orderInfo){
+        String jsonPreRequest = interceptedRequest.bodyToString();
+        //修改wdtoken部分===============================================
         // 目标时间：今天的 18:00:01
         LocalDateTime target = LocalDateTime.now()
                 .withHour(18)
                 .withMinute(0)
-                .withSecond(0)
+                .withSecond(1)
                 .withNano(0);
 
         // 当前时间
@@ -193,6 +168,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
             }
         }
         String WDVerifyToken = null;
+        JsonNode responsejson = null;
         try{
             // 获取 WDVerifyToken
             String urlString = String.format(
@@ -240,16 +216,36 @@ public class MyHttpHandler implements ProxyRequestHandler {
             reader.close();
             String json = response.toString();
             logging.logToError("\n"+json+"\n");
-            JsonNode root = new ObjectMapper().readTree(json);
-            WDVerifyToken = root.get("WDToken").asText();
+            responsejson = new ObjectMapper().readTree(json);
+            WDVerifyToken = responsejson.get("WDToken").asText();
             logging.logToOutput("Success get detail, include token "+WDVerifyToken+"\n");
-//            Thread.sleep(100);     //傻逼学校，wdtoken和create请求必须间隔2s以上
+//            Thread.sleep(2000);     //傻逼学校，wdtoken和create请求必须间隔2s以上
+//            logging.logToOutput("SLEEP 2s\n");
         }catch (Exception e){
             logging.logToOutput("Try to get wdtoken failed!!!!!!!!!!!!!!!!!!!!!!!\n");
         }
-        return WDVerifyToken;
-    }
+        //@TODO: 有关智能订场，如果预期时间已经被订了，就选一个其他时间
+        try {
+            // 解析成树
+            JsonNode requestjson = objectMapper.readTree(jsonPreRequest);
 
+            // 转成 ObjectNode 才能修改
+            if (requestjson.isObject()) {
+                ObjectNode obj = (ObjectNode) requestjson;
+
+                obj.put("appointmentStartDate", orderInfo.getAppointmentStartDate());
+                obj.put("appointmentEndDate", orderInfo.getAppointmentEndDate());
+                obj.put("stadiumsAreaId", orderInfo.getStadiumsAreaId());
+                obj.put("stadiumsAreaNo", orderInfo.getStadiumsAreaNo());
+                obj.put("WDVerifyToken", WDVerifyToken);
+                String requestModifiedStr = objectMapper.writeValueAsString(obj);
+                return interceptedRequest.withBody(requestModifiedStr);
+            }
+        } catch (Exception e) {
+            logging.logToError("修改 JSON 出错: " + e.getMessage());
+        }
+        return interceptedRequest;
+    }
 
 
 }
