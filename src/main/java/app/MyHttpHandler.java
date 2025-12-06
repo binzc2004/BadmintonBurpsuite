@@ -45,7 +45,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
     public MyHttpHandler(MontoyaApi api) {
         this.logging = api.logging();
         logging.logToOutput("Plugin register successs 👌");
-        logging.logToOutput("Plugin version: 1.0.1");
+        logging.logToOutput("Plugin version: 2.0.1");
 
         // 获取用户目录
         String userHome = System.getProperty("user.home");
@@ -225,6 +225,11 @@ public class MyHttpHandler implements ProxyRequestHandler {
             logging.logToOutput("Try to get wdtoken failed!!!!!!!!!!!!!!!!!!!!!!!\n");
         }
         //@TODO: 有关智能订场，如果预期时间已经被订了，就选一个其他时间
+        try{
+            SmartOrder(aOrderInfo,responsejson.get("response").get("AppointmentTimes"));
+        }catch (Exception e){
+            logging.logToOutput("SmartOrder failed!!!!!!!!!!!!!!!!!!!!!!!\n");
+        }
         try {
             // 解析成树
             JsonNode requestjson = objectMapper.readTree(jsonPreRequest);
@@ -246,6 +251,68 @@ public class MyHttpHandler implements ProxyRequestHandler {
         }
         return interceptedRequest;
     }
+    private void SmartOrder(OrderInfo aOrderInfo, JsonNode arrNodes) {
 
+        // ========== 1. 计算需要连续几个小时 ==========
+        String startStr = aOrderInfo.getAppointmentStartDate().substring(11); // "19:00"
+        String endStr   = aOrderInfo.getAppointmentEndDate().substring(11);   // "21:00"
 
+        int needHours = Integer.parseInt(endStr.substring(0, 2)) -
+                Integer.parseInt(startStr.substring(0, 2));
+
+        // ========== 2. 找到预期起点对应的 index ==========
+        int wantIndex = -1;
+        for (int i = 0; i < arrNodes.size(); i++) {
+            if (arrNodes.get(i).get("StartTime").asText().equals(startStr)) {
+                wantIndex = i;
+                break;
+            }
+        }
+
+        if (wantIndex == -1) {
+            logging.logToOutput("Expected start time not found");
+            return;
+        }
+
+        // ========== 3. 先检查预期时间段是否可用 ==========
+        if (isOk(arrNodes, wantIndex, needHours)) {
+            logging.logToOutput("Expected time is available");
+            return;
+        }
+
+        // ========== 4. 不可用 → 滑动窗口，从后往前找 ==========
+        int lastStartIndex = arrNodes.size() - needHours;
+
+        for (int i = lastStartIndex; i >= 0; i--) {
+            if (isOk(arrNodes, i, needHours)) {
+
+                JsonNode s = arrNodes.get(i);
+                JsonNode e = arrNodes.get(i + needHours - 1);
+
+                String date = aOrderInfo.getAppointmentStartDate().substring(0, 10);
+
+                String newStart = date + " " + s.get("StartTime").asText();
+                String newEnd   = date + " " + e.get("EndTime").asText();
+
+                aOrderInfo.setAppointmentStartDate(newStart);
+                aOrderInfo.setAppointmentEndDate(newEnd);
+
+                logging.logToError("Expected time is unavilabe,now adjust to: " + newStart + " ~ " + newEnd);
+                return;
+            }
+        }
+
+        // ========== 5. 全都找不到 ==========
+        logging.logToError("!!!!!! Today don't have any time ");
+    }
+
+    private boolean isOk(JsonNode arrNodes, int start, int needHours) {
+        if (start + needHours > arrNodes.size()) return false;
+        for (int i = 0; i < needHours; i++) {
+            if (arrNodes.get(start + i).get("IsCanAppointment").asInt() != 1) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

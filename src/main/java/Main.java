@@ -22,7 +22,7 @@ public class Main {
             // 设置请求头
             conn.setRequestProperty("accept", "*/*");
             conn.setRequestProperty("accept-language", "zh-CN,zh;q=0.9");
-            conn.setRequestProperty("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiMjAyMjMwMjExMTE1MCIsImp0aSI6IjIxMjUiLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL2V4cGlyYXRpb24iOiIxMi81LzIwMjUgNTo1NzowMyBBTSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL3N5c3RlbSI6Img1IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiQ2xpZW50IiwibmJmIjoxNzY0ODQyMjIzLCJleHAiOjE3NjQ4ODU0MjMsImlzcyI6Ikd5bVJlc2VydmF0aW9uIiwiYXVkIjoid3IifQ.cLfztUJbMjibQS72Yp_zBt_Lfug-BzIPI6-phKoMQeI");
+            conn.setRequestProperty("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiMjAyMjMwMjExMTE1MCIsImp0aSI6IjIxMjUiLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL2V4cGlyYXRpb24iOiIxMi83LzIwMjUgNTo1NjowMSBBTSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL3N5c3RlbSI6Img1IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiQ2xpZW50IiwibmJmIjoxNzY1MDE0OTYxLCJleHAiOjE3NjUwNTgxNjEsImlzcyI6Ikd5bVJlc2VydmF0aW9uIiwiYXVkIjoid3IifQ.V35JFFxpkkt6LFi0qf3iwGULFrvqVF0mEwy5qK-1X-Q");
             conn.setRequestProperty("content-type", "application/json");
             conn.setRequestProperty("priority", "u=1, i");
             conn.setRequestProperty("referer", "https://gym.whu.edu.cn/hsdsqhafive/pages/index/detail?areaId=11&areaNo=8&date=2025-10-29");
@@ -52,7 +52,9 @@ public class Main {
             String json = response.toString();
             JsonNode root = new ObjectMapper().readTree(json);
              String WDVerifyToken = root.get("WDToken").asText();
+            root.get("response").get("AppointmentTimes");
              System.out.println(WDVerifyToken);
+             System.out.println();
 
         } catch (Exception e) {
             e.printStackTrace();
