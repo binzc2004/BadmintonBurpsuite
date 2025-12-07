@@ -34,7 +34,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     private String whuUrl="https://gym.whu.edu.cn/api/GSOrder/Create";
 
-    private String passtime = "18:00:00";
+    private int sleeptime = 2000;
 
     private OrderInfo aOrderInfo;  //  存储 Order 对象
 
@@ -61,8 +61,8 @@ public class MyHttpHandler implements ProxyRequestHandler {
             JsonNode root = objectMapper.readTree(configFile);
 
             // 取 passtime 字段
-            if (root.has("passtime")) {
-                this.passtime = root.get("passtime").asText();
+            if (root.has("sleeptime")) {
+                this.sleeptime = root.get("sleeptime").asInt();
             }
 
             // 取 orderinfos 并映射成 List<OrderInfo>
@@ -74,7 +74,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
             }
 
             logging.logToOutput("config load success ✅");
-            logging.logToOutput("passtime = " + passtime);
+            logging.logToOutput("sleeptime = " + sleeptime);
             logging.logToOutput("order = " + aOrderInfo);
 
         } catch (IOException e) {
@@ -100,7 +100,12 @@ public class MyHttpHandler implements ProxyRequestHandler {
         if( whuUrl.equals(requestUrl)) {
             sleepUntilRelease();
             // 输出当前时间
-            logging.logToOutput("Current time: " + java.time.LocalDateTime.now());
+            logging.logToOutput(
+                    "Release request: " +
+                            java.time.LocalDateTime.now()
+                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+            );
+
             // 输出请求体
             logging.logToOutput("Request body Modified: " + interceptedRequest.bodyToString()+"\n\n");
 
@@ -109,33 +114,9 @@ public class MyHttpHandler implements ProxyRequestHandler {
     }
 
     public void sleepUntilRelease() {
-        LocalDateTime now = LocalDateTime.now();
-
-        // 解析 passtime 字符串为 LocalTime
-        LocalTime passLocalTime;
         try {
-            passLocalTime = LocalTime.parse(passtime); // passtime 格式必须是 "HH:mm:ss"
-        } catch (DateTimeParseException e) {
-            logging.logToError("Invalid passtime format: " + passtime);
-            return;
-        }
-
-        LocalDateTime targetTime = now.with(passLocalTime);
-
-        // 如果已经过了 passtime
-        if (now.isAfter(targetTime)) {
-            logging.logToError("Current time is already past passtime: " + passtime);
-            return;
-        }
-
-        Duration duration = Duration.between(now, targetTime);
-        long millisToSleep = duration.toMillis();
-
-        logging.logToOutput("Sleeping for " + millisToSleep +
-                " milliseconds until " + targetTime);
-
-        try {
-            Thread.sleep(millisToSleep);
+            Thread.sleep(this.sleeptime);
+            logging.logToOutput("SLEEP " + this.sleeptime + "ms");
         } catch (InterruptedException e) {
             e.printStackTrace();
             Thread.currentThread().interrupt(); // 重新设置中断状态
@@ -149,11 +130,13 @@ public class MyHttpHandler implements ProxyRequestHandler {
         String jsonPreRequest = interceptedRequest.bodyToString();
         //修改wdtoken部分===============================================
         // 目标时间：今天的 18:00:01
+        int millions = 300;
         LocalDateTime target = LocalDateTime.now()
                 .withHour(18)
                 .withMinute(0)
-                .withSecond(1)
-                .withNano(0);
+                .withSecond(0)
+
+                .withNano(1000000*millions);
 
         // 当前时间
         LocalDateTime now = LocalDateTime.now();
@@ -167,6 +150,12 @@ public class MyHttpHandler implements ProxyRequestHandler {
                 Thread.currentThread().interrupt();
             }
         }
+        logging.logToOutput(
+                "Start to get WDToken: " +
+                        java.time.LocalDateTime.now()
+                                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+        );
+
         String WDVerifyToken = null;
         JsonNode responsejson = null;
         try{
@@ -219,8 +208,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
             responsejson = new ObjectMapper().readTree(json);
             WDVerifyToken = responsejson.get("WDToken").asText();
             logging.logToOutput("Success get detail, include token "+WDVerifyToken+"\n");
-//            Thread.sleep(2000);     //傻逼学校，wdtoken和create请求必须间隔2s以上
-//            logging.logToOutput("SLEEP 2s\n");
+            logging.logToOutput("Token time: "+ responsejson.get("WDTokenTime").asText());
         }catch (Exception e){
             logging.logToOutput("Try to get wdtoken failed!!!!!!!!!!!!!!!!!!!!!!!\n");
         }
