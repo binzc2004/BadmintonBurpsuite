@@ -6,7 +6,7 @@ import burp.api.montoya.MontoyaApi;
 public class HttpExtension implements BurpExtension {
     @Override
     public void initialize(MontoyaApi api) {
-        api.extension().setName("武汉大学羽毛球场预约BurpSuite插件");
+        api.extension().setName("武汉大学羽毛球场预约BurpSuite插件--主动发请求版本");
         api.proxy().registerRequestHandler(new MyHttpHandler(api));
     }
 }

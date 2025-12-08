@@ -36,6 +36,12 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     private int sleeptime = 2000;
 
+    private java.net.http.HttpClient client =
+            java.net.http.HttpClient.newBuilder()
+                    .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                    .connectTimeout(Duration.ofSeconds(3))
+                    .build();
+
     private OrderInfo aOrderInfo;  //  存储 Order 对象
 
 
@@ -45,7 +51,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
     public MyHttpHandler(MontoyaApi api) {
         this.logging = api.logging();
         logging.logToOutput("Plugin register successs 👌");
-        logging.logToOutput("Plugin version: 2.0.1");
+        logging.logToOutput("Plugin version: 3.0.1");
 
         // 获取用户目录
         String userHome = System.getProperty("user.home");
@@ -99,18 +105,11 @@ public class MyHttpHandler implements ProxyRequestHandler {
         String requestUrl=interceptedRequest.url();
         if( whuUrl.equals(requestUrl)) {
             sleepUntilRelease();
-            // 输出当前时间
-            logging.logToOutput(
-                    "Release request: " +
-                            java.time.LocalDateTime.now()
-                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
-            );
-
-            // 输出请求体
-            logging.logToOutput("Request body Modified: " + interceptedRequest.bodyToString()+"\n\n");
-
+            PostCreate(interceptedRequest);
+            return null;
+        }else{
+            return ProxyRequestToBeSentAction.continueWith(interceptedRequest);
         }
-        return ProxyRequestToBeSentAction.continueWith(interceptedRequest);
     }
 
     public void sleepUntilRelease() {
@@ -122,6 +121,64 @@ public class MyHttpHandler implements ProxyRequestHandler {
             Thread.currentThread().interrupt(); // 重新设置中断状态
         }
     }
+
+    /**
+     * 直接发出请求，不是释放请求，或许这样会快一点？
+     */
+    private void PostCreate(InterceptedRequest interceptedRequest) {
+
+        try {
+            // ===== 构造 URL =====
+            String url = interceptedRequest.url();
+            logging.logToOutput("POST URL: " + url);
+
+            // ===== 请求体 =====
+            String body = interceptedRequest.bodyToString();
+            logging.logToOutput("Request body Modified: " + body + "\n");
+
+            // ===== 构造 Builder =====
+            java.net.http.HttpRequest.Builder builder =
+                    java.net.http.HttpRequest.newBuilder()
+                            .uri(java.net.URI.create(url))
+                            .timeout(Duration.ofSeconds(5))
+                            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body));
+
+            // ===== 复制 interceptedRequest headers =====
+            interceptedRequest.headers().forEach(h -> {
+                try {
+                    builder.header(h.name(), h.value());
+                } catch (Exception ignored) {}
+            });
+
+            // ===== 构造请求 =====
+            java.net.http.HttpRequest httpRequest = builder.build();
+
+            // ===== 发送请求 =====
+            // 输出当前时间
+            logging.logToOutput(
+                    "Post request: " +
+                            java.time.LocalDateTime.now()
+                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+            );
+            java.net.http.HttpResponse<String> response =
+                    client.send(httpRequest, java.net.http.HttpResponse.BodyHandlers.ofString());
+            int code = response.statusCode();
+            String respBody = response.body();
+
+            logging.logToOutput("POST Response Code: " + code);
+            // 输出当前时间
+            logging.logToOutput(
+                    "Receive request: " +
+                            java.time.LocalDateTime.now()
+                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+            );
+            logging.logToError("POST Response Body: " + respBody + "\n");
+
+        } catch (Exception e) {
+            logging.logToError("PostCreate Error: " + e.getMessage());
+        }
+    }
+
 
 
 
@@ -158,58 +215,59 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
         String WDVerifyToken = null;
         JsonNode responsejson = null;
-        try{
-            // 获取 WDVerifyToken
+
+        try {
+            // 构造 URL
             String urlString = String.format(
                     "https://gym.whu.edu.cn/api/GSStadiums/GetAppointmentDetail?Version=%s&StadiumsAreaId=%s&StadiumsAreaNo=%s&AppointmentDate=%s",
-                    3, this.aOrderInfo.getStadiumsAreaId(), this.aOrderInfo.getStadiumsAreaNo(), this.aOrderInfo.getAppointmentStartDate().split(" ")[0]
+                    3,
+                    this.aOrderInfo.getStadiumsAreaId(),
+                    this.aOrderInfo.getStadiumsAreaNo(),
+                    this.aOrderInfo.getAppointmentStartDate().split(" ")[0]
             );
+
             logging.logToOutput("\n URL :" + urlString);
-            URL url = new URL(urlString);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            // 设置请求方法
-            conn.setRequestMethod("GET");
 
-            // 设置请求头
-            conn.setRequestProperty("accept", "*/*");
-            conn.setRequestProperty("accept-language", "zh-CN,zh;q=0.9");
-            conn.setRequestProperty("Authorization",interceptedRequest.headerValue("Authorization") );
-            conn.setRequestProperty("content-type", "application/json");
-            conn.setRequestProperty("priority", "u=1, i");
-            conn.setRequestProperty("referer", "https://gym.whu.edu.cn/hsdsqhafive/pages/index/detail?areaId=11&areaNo=8&date=2025-10-29");
-            conn.setRequestProperty("sec-ch-ua", "\"Google Chrome\";v=\"141\", \"Not?A_Brand\";v=\"8\", \"Chromium\";v=\"141\"");
-            conn.setRequestProperty("sec-ch-ua-mobile", "?0");
-            conn.setRequestProperty("sec-ch-ua-platform", "\"Windows\"");
-            conn.setRequestProperty("sec-fetch-dest", "empty");
-            conn.setRequestProperty("sec-fetch-mode", "cors");
-            conn.setRequestProperty("sec-fetch-site", "same-origin");
-            conn.setRequestProperty("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36");
-            conn.setRequestProperty("Cookie",interceptedRequest.headerValue("Cookie"));
-            // 发请求
-            int responseCode = conn.getResponseCode();
-            logging.logToOutput("Response Code: " + responseCode);
+            // 构建请求（也使用全限定名）
+            java.net.http.HttpRequest request =
+                    java.net.http.HttpRequest.newBuilder()
+                            .uri(URI.create(urlString))
+                            .timeout(Duration.ofSeconds(5))
+                            .header("accept", "*/*")
+                            .header("accept-language", "zh-CN,zh;q=0.9")
+                            .header("Authorization", interceptedRequest.headerValue("Authorization"))
+                            .header("content-type", "application/json")
+                            .header("priority", "u=1, i")
+                            .header("referer", "https://gym.whu.edu.cn/hsdsqhafive/pages/index/detail?areaId=11&areaNo=8&date=2025-10-29")
+                            .header("sec-ch-ua", "\"Google Chrome\";v=\"141\", \"Not?A_Brand\";v=\"8\", \"Chromium\";v=\"141\"")
+                            .header("sec-ch-ua-mobile", "?0")
+                            .header("sec-ch-ua-platform", "\"Windows\"")
+                            .header("sec-fetch-dest", "empty")
+                            .header("sec-fetch-mode", "cors")
+                            .header("sec-fetch-site", "same-origin")
+                            .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
+                            .header("Cookie", interceptedRequest.headerValue("Cookie"))
+                            .GET()
+                            .build();
 
-            // 读取响应
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), "UTF-8")
-            );
+            // 发起请求（使用全限定名的 BodyHandlers）
+            java.net.http.HttpResponse<String> response =
+                  this.client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
 
-            StringBuilder response = new StringBuilder();
-            String line;
+            logging.logToOutput("Response Code: " + response.statusCode());
 
-            while ((line = reader.readLine()) != null) {
-                response.append(line);
-            }
+            String json = response.body();
 
-            reader.close();
-            String json = response.toString();
-            logging.logToError("\n"+json+"\n");
+            logging.logToError("\n" + json + "\n");
+
+            // 解析 JSON
             responsejson = new ObjectMapper().readTree(json);
+
             WDVerifyToken = responsejson.get("WDToken").asText();
-            logging.logToOutput("Success get detail, include token "+WDVerifyToken+"\n");
-            logging.logToOutput("Token time: "+ responsejson.get("WDTokenTime").asText());
-        }catch (Exception e){
+            logging.logToOutput("Success get detail, include token " + WDVerifyToken + "\n");
+            logging.logToOutput("Token time: " + responsejson.get("WDTokenTime").asText());
+
+        } catch (Exception e) {
             logging.logToOutput("Try to get wdtoken failed!!!!!!!!!!!!!!!!!!!!!!!\n");
         }
         //@TODO: 有关智能订场，如果预期时间已经被订了，就选一个其他时间
