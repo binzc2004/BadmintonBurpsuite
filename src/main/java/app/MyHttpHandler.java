@@ -26,7 +26,9 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 
 public class MyHttpHandler implements ProxyRequestHandler {
 
@@ -34,7 +36,6 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     private String whuUrl="https://gym.whu.edu.cn/api/GSOrder/Create";
 
-    private int sleeptime = 2000;
 
     private java.net.http.HttpClient client =
             java.net.http.HttpClient.newBuilder()
@@ -42,7 +43,14 @@ public class MyHttpHandler implements ProxyRequestHandler {
                     .connectTimeout(Duration.ofSeconds(3))
                     .build();
 
-    private OrderInfo aOrderInfo;  //  存储 Order 对象
+    private List<OrderInfo> orderInfos;  //  存储 Order 对象
+
+    private int orderIndex = -1;  // 记录当前订单的索引
+
+    private int getOrderIndex(){
+        orderIndex = (orderIndex+1)%orderInfos.size();
+        return orderIndex;
+    }
 
 
     private final ObjectMapper objectMapper = new ObjectMapper();    //包装器
@@ -66,22 +74,17 @@ public class MyHttpHandler implements ProxyRequestHandler {
             // 先读成树形结构
             JsonNode root = objectMapper.readTree(configFile);
 
-            // 取 passtime 字段
-            if (root.has("sleeptime")) {
-                this.sleeptime = root.get("sleeptime").asInt();
-            }
 
             // 取 orderinfos 并映射成 List<OrderInfo>
-            if (root.has("orderinfo")) {
-                this.aOrderInfo = objectMapper.readValue(
-                        root.get("orderinfo").toString(),
-                        new TypeReference<OrderInfo>() {}
+            if (root.has("orderinfos")) {
+                this.orderInfos = objectMapper.readValue(
+                        root.get("orderinfos").toString(),
+                        new TypeReference<List<OrderInfo>>() {}
                 );
             }
 
             logging.logToOutput("config load success ✅");
-            logging.logToOutput("sleeptime = " + sleeptime);
-            logging.logToOutput("order = " + aOrderInfo);
+            logging.logToOutput("orderInfos = " + orderInfos);
 
         } catch (IOException e) {
             logging.logToError("config load failure: " + e.getMessage());
@@ -92,7 +95,9 @@ public class MyHttpHandler implements ProxyRequestHandler {
         String requestUrl = interceptedRequest.url();
 
         if (whuUrl.equals(requestUrl)) {
-            HttpRequest modifiedRequest = modifyRequest(interceptedRequest,aOrderInfo);
+            int index = getOrderIndex();
+            logging.logToOutput("index = " + index+", 当前预约订单是："+ orderInfos.get(index).toString());
+            HttpRequest modifiedRequest = modifyRequest(interceptedRequest,orderInfos.get(index));
             return ProxyRequestReceivedAction.continueWith(modifiedRequest);
         } else {
             return ProxyRequestReceivedAction.continueWith(interceptedRequest);
@@ -104,7 +109,6 @@ public class MyHttpHandler implements ProxyRequestHandler {
     public ProxyRequestToBeSentAction handleRequestToBeSent(InterceptedRequest interceptedRequest) {
         String requestUrl=interceptedRequest.url();
         if( whuUrl.equals(requestUrl)) {
-            sleepUntilRelease();
             PostCreate(interceptedRequest);
             return null;
         }else{
@@ -112,10 +116,10 @@ public class MyHttpHandler implements ProxyRequestHandler {
         }
     }
 
-    public void sleepUntilRelease() {
+    public void sleepUntilRelease(long sleeptime) {
         try {
-            Thread.sleep(this.sleeptime);
-            logging.logToOutput("SLEEP " + this.sleeptime + "ms");
+            logging.logToOutput("SLEEP " + sleeptime + "ms");
+            Thread.sleep(sleeptime);
         } catch (InterruptedException e) {
             e.printStackTrace();
             Thread.currentThread().interrupt(); // 重新设置中断状态
@@ -215,15 +219,16 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
         String WDVerifyToken = null;
         JsonNode responsejson = null;
+        long sleeptime=0;
 
         try {
             // 构造 URL
             String urlString = String.format(
                     "https://gym.whu.edu.cn/api/GSStadiums/GetAppointmentDetail?Version=%s&StadiumsAreaId=%s&StadiumsAreaNo=%s&AppointmentDate=%s",
                     3,
-                    this.aOrderInfo.getStadiumsAreaId(),
-                    this.aOrderInfo.getStadiumsAreaNo(),
-                    this.aOrderInfo.getAppointmentStartDate().split(" ")[0]
+                    orderInfo.getStadiumsAreaId(),
+                    orderInfo.getStadiumsAreaNo(),
+                    orderInfo.getAppointmentStartDate().split(" ")[0]
             );
 
             logging.logToOutput("\n URL :" + urlString);
@@ -251,18 +256,34 @@ public class MyHttpHandler implements ProxyRequestHandler {
                             .build();
 
             // 发起请求（使用全限定名的 BodyHandlers）
-            java.net.http.HttpResponse<String> response =
-                  this.client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-
-            logging.logToOutput("Response Code: " + response.statusCode());
-
-            String json = response.body();
-
+            String json;
+            int retryCount = 0;
+            while(true){
+                java.net.http.HttpResponse<String> response =
+                        this.client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                logging.logToOutput("Response Code: " + response.statusCode());
+                json = response.body();
+                responsejson = new ObjectMapper().readTree(json);
+                if(responsejson.get("success").asBoolean()||(retryCount>100))break;
+                retryCount++;
+                logging.logToOutput("第"+retryCount+"次重试,获得WDToken");
+                Thread.sleep(100);
+            }
             logging.logToError("\n" + json + "\n");
 
             // 解析 JSON
             responsejson = new ObjectMapper().readTree(json);
+            {
+                String WDTokenTime = responsejson.get("WDTokenTime").asText();
 
+                DateTimeFormatter formatter =
+                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                LocalDateTime tokenTime = LocalDateTime.parse(WDTokenTime, formatter);
+                LocalDateTime nowh = LocalDateTime.now();
+                long diffMs = Duration.between(tokenTime, nowh).toMillis();
+                sleeptime = Math.max(0, 2000 - diffMs);
+
+            }
             WDVerifyToken = responsejson.get("WDToken").asText();
             logging.logToOutput("Success get detail, include token " + WDVerifyToken + "\n");
             logging.logToOutput("Token time: " + responsejson.get("WDTokenTime").asText());
@@ -272,7 +293,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
         }
         //@TODO: 有关智能订场，如果预期时间已经被订了，就选一个其他时间
         try{
-            SmartOrder(aOrderInfo,responsejson.get("response").get("AppointmentTimes"));
+            SmartOrder(orderInfo,responsejson.get("response").get("AppointmentTimes"));
         }catch (Exception e){
             logging.logToOutput("SmartOrder failed!!!!!!!!!!!!!!!!!!!!!!!\n");
         }
@@ -290,6 +311,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
                 obj.put("stadiumsAreaNo", orderInfo.getStadiumsAreaNo());
                 obj.put("WDVerifyToken", WDVerifyToken);
                 String requestModifiedStr = objectMapper.writeValueAsString(obj);
+                sleepUntilRelease(sleeptime);
                 return interceptedRequest.withBody(requestModifiedStr);
             }
         } catch (Exception e) {

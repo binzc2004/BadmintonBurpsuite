@@ -13,7 +13,7 @@ target/
 *.ipr
 .idea/
 
-
+jars/
 ### Eclipse ###
 .apt_generated
 .classpath
