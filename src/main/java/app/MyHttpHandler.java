@@ -47,6 +47,8 @@ public class MyHttpHandler implements ProxyRequestHandler {
 
     private int orderIndex = -1;  // 记录当前订单的索引
 
+    private long asleepTime = 100; // 记录上次睡眠时间
+
     private int getOrderIndex(){
         orderIndex = (orderIndex+1)%orderInfos.size();
         return orderIndex;
@@ -60,6 +62,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
         this.logging = api.logging();
         logging.logToOutput("Plugin register successs 👌");
         logging.logToOutput("Plugin version: 3.0.1");
+        logging.logToOutput("LastModifyTime: 2026-03-19");
 
         // 获取用户目录
         String userHome = System.getProperty("user.home");
@@ -144,7 +147,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
             java.net.http.HttpRequest.Builder builder =
                     java.net.http.HttpRequest.newBuilder()
                             .uri(java.net.URI.create(url))
-                            .timeout(Duration.ofSeconds(5))
+                            .timeout(Duration.ofSeconds(60))
                             .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body));
 
             // ===== 复制 interceptedRequest headers =====
@@ -191,13 +194,10 @@ public class MyHttpHandler implements ProxyRequestHandler {
         String jsonPreRequest = interceptedRequest.bodyToString();
         //修改wdtoken部分===============================================
         // 目标时间：今天的 18:00:01
-        int millions = 300;
         LocalDateTime target = LocalDateTime.now()
                 .withHour(18)
                 .withMinute(0)
-                .withSecond(0)
-
-                .withNano(1000000*millions);
+                .withSecond(0);
 
         // 当前时间
         LocalDateTime now = LocalDateTime.now();
@@ -282,6 +282,8 @@ public class MyHttpHandler implements ProxyRequestHandler {
                 LocalDateTime nowh = LocalDateTime.now();
                 long diffMs = Duration.between(tokenTime, nowh).toMillis();
                 sleeptime = Math.max(0, 2000 - diffMs);
+                sleeptime = Math.min(sleeptime, this.asleepTime);
+                this.asleepTime += 100;
 
             }
             WDVerifyToken = responsejson.get("WDToken").asText();
@@ -311,7 +313,7 @@ public class MyHttpHandler implements ProxyRequestHandler {
                 obj.put("stadiumsAreaNo", orderInfo.getStadiumsAreaNo());
                 obj.put("WDVerifyToken", WDVerifyToken);
                 String requestModifiedStr = objectMapper.writeValueAsString(obj);
-                sleepUntilRelease(sleeptime);
+//                sleepUntilRelease(sleeptime);
                 return interceptedRequest.withBody(requestModifiedStr);
             }
         } catch (Exception e) {
